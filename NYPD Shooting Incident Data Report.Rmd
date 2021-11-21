@@ -119,7 +119,8 @@ global_incidents_age %>% ggplot() +
 
 
 ## Bias Identification
-From the table below, we find that although the victims of BLACK is the highest, but the murder_ratio in lower than WHITE and ASIAN. Maybe this result is related to the fitness of different race people.
+From the table below, we find that although the victims of BLACK is the highest, but the murder_ratio in lower than WHITE and ASIAN. 
+
 ```{r}
 global_incidents_new %>%
   group_by(VIC_RACE) %>%
