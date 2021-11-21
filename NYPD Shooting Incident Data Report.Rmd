@@ -1,0 +1,160 @@
+---
+title: "NYPD Shooting Incident Data Analysis"
+author: ""
+date: ""
+output:
+  html_document: default
+  pdf_document: default
+---
+
+
+```{r get_get}
+library(caret)
+library(tidyverse)
+url <- "https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv"
+global_incidents <- read_csv(url)
+```
+
+## Question of interest
+This analysis will try to discover the incidents over time and the related feature on the rate of murder.
+
+## Data Description
+The dataset is downloaded from <https://data.gov>. Each **shooting incident** that occurred in NYC from 2006 to 2020 is listed, including information about events, the location and time of occurrence. 
+
+
+## Data Cleaning
+Select the useful variable in this analysis, and clean up the dataset by changing data types like STATISTICAL_MURDER_FLAG, OCCUR_DATE and BORO. The summary of the data is also added to be sure there is no missing data.
+```{r}
+global_incidents_new <- global_incidents %>%
+  select(INCIDENT_KEY,OCCUR_DATE,OCCUR_TIME,BORO,STATISTICAL_MURDER_FLAG,VIC_AGE_GROUP,VIC_SEX,VIC_RACE) %>%
+  mutate(STATISTICAL_MURDER_FLAG = as.numeric(STATISTICAL_MURDER_FLAG)) %>%
+  mutate(OCCUR_DATE = as.Date(OCCUR_DATE,format = "%m/%d/%y")) %>%
+  mutate(BORO = as.factor(BORO))
+
+summary(global_incidents_new)
+
+```
+
+
+## Data Analysis
+1. The first plot shows the number of incidents occurred with passage of time. Most of the victims in the incidents are male, and the number of incidents seems to be high in summer. 
+```{r}
+get_sex_num <- function(x,m){
+  if (x==m){
+    res <- 1
+  }else{
+    res <- 0
+  }
+  return(res)
+}
+
+
+global_incidents_new$male <- sapply(global_incidents_new$VIC_SEX,get_sex_num,'M')
+global_incidents_new$female <- sapply(global_incidents_new$VIC_SEX,get_sex_num,'F')
+
+
+incidents_by_sex <- global_incidents_new %>%
+  group_by(OCCUR_DATE) %>%
+  summarize(male_n=sum(male),female_n=sum(female)) %>%
+  ungroup() 
+
+incidents_by_sex %>% 
+  ggplot(aes(x=OCCUR_DATE,y=male_n)) +
+  geom_line(aes(color="male")) +
+  geom_line(aes(y=female_n,color="female")) +
+  theme(legend.position="bottom",
+        axis.text.x=element_text(angle=90)) +
+  labs(title = "Shooting Victims in NYC", y=NULL)
+
+```
+
+2. The second plot shows the ratio of murder, which is stable in these years.
+
+```{r}
+incidents_by_date <- global_incidents_new %>%
+  group_by(OCCUR_DATE) %>%
+  summarize(n=n(),murder_n=sum(STATISTICAL_MURDER_FLAG)) %>%
+  mutate(murder_ratio=murder_n/n) %>%
+  ungroup() 
+  
+incidents_by_date %>% 
+  ggplot(aes(x=OCCUR_DATE,y=murder_ratio)) +
+  geom_line(aes(color="murder_ratio")) +
+  #geom_line(aes(y=murder_n,color="murder incidents")) +
+  theme(legend.position="bottom",
+        axis.text.x=element_text(angle=90)) +
+  labs(title = "The ratio of murder in NYC's Shooting incidents", y=NULL)
+
+```
+
+
+## Data Modeling
+We transform the vic_age_group into order number and investigate the relationship between age and murder_ratio. From the **Linear Model**, we can obviously see that the older the victim is, the more likely to be murdered.
+```{r}
+global_incidents_new$age_order <- as.numeric(as.factor(global_incidents_new$VIC_AGE_GROUP))
+
+global_incidents_age <- global_incidents_new %>%
+  filter(age_order<6) %>%
+  group_by(age_order) %>%
+  summarize(n=n(),murder_n=sum(STATISTICAL_MURDER_FLAG)) %>%
+  mutate(murder_ratio=murder_n/n) %>%
+  ungroup() 
+
+global_incidents_age
+```
+
+
+```{r}
+summary(lm(murder_ratio~as.numeric(age_order),global_incidents_age))
+
+```
+
+
+
+```{r}
+global_incidents_age %>% ggplot() +
+  geom_point(aes(x=age_order,y=murder_ratio),color='blue')
+
+```
+
+
+## Bias Identification
+From the table below, we find that although the victims of BLACK is the highest, but the murder_ratio in lower than WHITE and ASIAN. Maybe this result is related to the fitness of different race people.
+```{r}
+global_incidents_new %>%
+  group_by(VIC_RACE) %>%
+  summarize(n=n(),murder_n=sum(STATISTICAL_MURDER_FLAG)) %>%
+  mutate(murder_ratio=murder_n/n) %>%
+  ungroup() 
+```
+
+
+## Prediction Model
+
+We also try to predict the **STATISTICAL_MURDER_FLAG** with other features using logistic regression. We found the significant feature is **VIC_AGE_GROUP**. And this model can achieve an accuracy of 0.54 on testing dataset with threshod of 0.2. 
+```{r}
+test <- createDataPartition(global_incidents_new$STATISTICAL_MURDER_FLAG, times = 1, p = 0.2, list = FALSE)
+training_set <- global_incidents_new %>% slice(-test)
+testing_set <- global_incidents_new %>% slice(test)
+
+lr_model <- glm(STATISTICAL_MURDER_FLAG~as.factor(VIC_AGE_GROUP)+as.factor(VIC_SEX)+as.factor(VIC_RACE)+as.factor(BORO),training_set,family='binomial')
+
+summary(lr_model)
+
+```
+
+```{r}
+pred <-predict(lr_model,testing_set,type='response')
+y_pred <- as.numeric(pred>0.2)
+confusionMatrix(as.factor(y_pred), as.factor(testing_set$STATISTICAL_MURDER_FLAG),positive='1')
+
+```
+
+## Conclusion
+From the above analysis, we found that the shooting incidents occurred more on MALE,BLACK and 25-44 people. Besides, the murder_ratio is related to the age and vic_race with some bias identification. 
+
+
+## Session info
+```{r}
+sessionInfo()
+```
